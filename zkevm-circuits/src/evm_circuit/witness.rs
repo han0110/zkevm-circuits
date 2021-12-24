@@ -154,7 +154,7 @@ pub struct ExecStep {
     pub stack_pointer: usize,
     pub gas_left: u64,
     pub gas_cost: u64,
-    pub memory_size: u64,
+    pub memory_size: u32,
     pub state_write_counter: usize,
     pub opcode: Option<OpcodeId>,
 }
@@ -493,7 +493,7 @@ fn step_convert(
         gas_left: step.gas_left.0,
         gas_cost: step.gas_cost.as_u64(),
         opcode: Some(step.op),
-        memory_size: step.memory_size as u64 / 32, /* memory size in word */
+        memory_size: (step.memory_size / 32) as u32, /* memory size in word */
         ..Default::default()
     };
     result

@@ -1,7 +1,7 @@
 use crate::{
     evm_circuit::{
         execution::ExecutionGadget,
-        param::NUM_BYTES_PROGRAM_COUNTER,
+        param::N_BYTES_PROGRAM_COUNTER,
         step::ExecutionState,
         util::{
             common_gadget::SameContextGadget,
@@ -20,7 +20,7 @@ use halo2::{arithmetic::FieldExt, circuit::Region, plonk::Error};
 #[derive(Clone, Debug)]
 pub(crate) struct PcGadget<F> {
     same_context: SameContextGadget<F>,
-    value: RandomLinearCombination<F, NUM_BYTES_PROGRAM_COUNTER>,
+    value: RandomLinearCombination<F, N_BYTES_PROGRAM_COUNTER>,
 }
 
 impl<F: FieldExt> ExecutionGadget<F> for PcGadget<F> {

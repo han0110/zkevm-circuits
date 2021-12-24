@@ -1,6 +1,7 @@
 use crate::{
     evm_circuit::{
         execution::ExecutionGadget,
+        param::N_BYTES_MEMORY_SIZE,
         step::ExecutionState,
         util::{
             common_gadget::SameContextGadget,
@@ -19,7 +20,7 @@ use halo2::{arithmetic::FieldExt, circuit::Region, plonk::Error};
 #[derive(Clone, Debug)]
 pub(crate) struct MsizeGadget<F> {
     same_context: SameContextGadget<F>,
-    value: RandomLinearCombination<F, 8>,
+    value: RandomLinearCombination<F, N_BYTES_MEMORY_SIZE>,
 }
 
 impl<F: FieldExt> ExecutionGadget<F> for MsizeGadget<F> {

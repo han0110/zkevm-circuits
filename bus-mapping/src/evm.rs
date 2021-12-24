@@ -152,14 +152,16 @@ impl GasCost {
     pub const SELFDESTRUCT: Self = Self(5000);
     /// Constant cost for CREATE
     pub const CREATE: Self = Self(32000);
-    /// Constant cost for every additional word when expanding memory
-    pub const MEMORY: Self = Self(3);
-    /// Constant cost for a cold SLOAD
-    pub const COLD_SLOAD_COST: Self = Self(2100);
-    /// Constant cost for a cold account access
-    pub const COLD_ACCOUNT_ACCESS_COST: Self = Self(2600);
-    /// Constant cost for a warm storage read
-    pub const WARM_STORAGE_READ_COST: Self = Self(100);
+    /// Constant cost for accessing account or storage key
+    pub const WARM_ACCESS: Self = Self(100);
+    /// Extra constant cost for accessing storage key
+    pub const EXTRA_COLD_ACCESS_STORAGE_KEY: Self = Self(2000);
+    /// Extra constant cost for accessing account
+    pub const EXTRA_COLD_ACCESS_ACCOUNT: Self = Self(2500);
+    /// Denominator of quadratic part of memory expansion gas cost
+    pub const MEMORY_EXPANSION_QUAD_DENOMINATOR: Self = Self(512);
+    /// Coefficient of linear part of memory expansion gas cost
+    pub const MEMORY_EXPANSION_LINEAR_COEFF: Self = Self(3);
 }
 
 impl GasCost {

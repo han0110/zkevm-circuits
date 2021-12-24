@@ -1,4 +1,4 @@
-use crate::{evm_circuit::param::MAX_MEMORY_SIZE_IN_BYTES, util::Expr};
+use crate::{evm_circuit::param::N_BYTES_MEMORY_ADDRESS, util::Expr};
 use bus_mapping::eth_types::U256;
 use halo2::{
     arithmetic::FieldExt,
@@ -11,9 +11,6 @@ pub(crate) mod common_gadget;
 pub(crate) mod constraint_builder;
 pub(crate) mod math_gadget;
 pub(crate) mod memory_gadget;
-
-type Address = u64;
-type MemorySize = u64;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Cell<F> {
@@ -78,7 +75,7 @@ pub(crate) struct RandomLinearCombination<F, const N: usize> {
 }
 
 impl<F: FieldExt, const N: usize> RandomLinearCombination<F, N> {
-    const NUM_BYTES: usize = N;
+    const N_BYTES: usize = N;
 
     pub(crate) fn random_linear_combine(bytes: [u8; N], randomness: F) -> F {
         bytes.iter().rev().fold(F::zero(), |acc, byte| {
@@ -140,7 +137,7 @@ impl<F: FieldExt, const N: usize> Expr<F> for RandomLinearCombination<F, N> {
 
 pub(crate) type Word<F> = RandomLinearCombination<F, 32>;
 pub(crate) type MemoryAddress<F> =
-    RandomLinearCombination<F, MAX_MEMORY_SIZE_IN_BYTES>;
+    RandomLinearCombination<F, N_BYTES_MEMORY_ADDRESS>;
 
 /// Returns the sum of the passed in cells
 pub(crate) mod sum {
@@ -218,11 +215,15 @@ pub(crate) mod select {
 
 /// Decodes a field element from its byte representation
 pub(crate) mod from_bytes {
-    use crate::{evm_circuit::param::MAX_BYTES_FIELD, util::Expr};
+    use crate::{evm_circuit::param::MAX_N_BYTES_INTEGER, util::Expr};
     use halo2::{arithmetic::FieldExt, plonk::Expression};
 
     pub(crate) fn expr<F: FieldExt, E: Expr<F>>(bytes: &[E]) -> Expression<F> {
-        assert!(bytes.len() <= MAX_BYTES_FIELD, "number of bytes too large");
+        assert!(
+            bytes.len() <= MAX_N_BYTES_INTEGER,
+            "Too many bytes to compose an integer in field"
+        );
+
         let mut value = 0.expr();
         let mut multiplier = F::one();
         for byte in bytes.iter() {
@@ -233,7 +234,11 @@ pub(crate) mod from_bytes {
     }
 
     pub(crate) fn value<F: FieldExt>(bytes: &[u8]) -> F {
-        assert!(bytes.len() <= MAX_BYTES_FIELD, "number of bytes too large");
+        assert!(
+            bytes.len() <= MAX_N_BYTES_INTEGER,
+            "Too many bytes to compose an integer in field"
+        );
+
         let mut value = F::zero();
         let mut multiplier = F::one();
         for byte in bytes.iter() {

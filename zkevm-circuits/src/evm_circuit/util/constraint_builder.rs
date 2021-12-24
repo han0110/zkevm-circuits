@@ -5,7 +5,7 @@ use crate::{
             AccountFieldTag, CallContextFieldTag, FixedTableTag, Lookup,
             RwTableTag, TxContextFieldTag,
         },
-        util::{Cell, Word},
+        util::{Cell, RandomLinearCombination, Word},
     },
     util::Expr,
 };
@@ -190,6 +190,15 @@ impl<'a, F: FieldExt> ConstraintBuilder<'a, F> {
 
     pub(crate) fn query_word(&mut self) -> Word<F> {
         Word::new(self.query_bytes(), self.power_of_randomness)
+    }
+
+    pub(crate) fn query_rlc<const N: usize>(
+        &mut self,
+    ) -> RandomLinearCombination<F, N> {
+        RandomLinearCombination::<F, N>::new(
+            self.query_bytes(),
+            self.randomness.clone(),
+        )
     }
 
     pub(crate) fn query_bytes<const N: usize>(&mut self) -> [Cell<F>; N] {
@@ -516,12 +525,45 @@ impl<'a, F: FieldExt> ConstraintBuilder<'a, F> {
         account_address: Expression<F>,
         value: Expression<F>,
         value_prev: Expression<F>,
-    ) {
+    ) -> Expression<F> {
         self.rw_lookup(
             true.expr(),
             RwTableTag::TxAccessListAccount,
-            [tx_id, account_address, value, value_prev, 0.expr()],
+            [
+                tx_id,
+                account_address,
+                value.expr(),
+                value_prev.expr(),
+                0.expr(),
+            ],
         );
+
+        value - value_prev
+    }
+
+    pub(crate) fn account_access_list_write_with_reversion(
+        &mut self,
+        tx_id: Expression<F>,
+        account_address: Expression<F>,
+        value: Expression<F>,
+        value_prev: Expression<F>,
+        is_persistent: Expression<F>,
+        rw_counter_end_of_reversion: Expression<F>,
+    ) -> Expression<F> {
+        self.state_write_with_reversion(
+            RwTableTag::TxAccessListAccount,
+            [
+                tx_id,
+                account_address,
+                value.expr(),
+                value_prev.expr(),
+                0.expr(),
+            ],
+            is_persistent,
+            rw_counter_end_of_reversion,
+        );
+
+        value - value_prev
     }
 
     // Account
