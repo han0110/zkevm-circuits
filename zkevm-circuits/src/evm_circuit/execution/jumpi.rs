@@ -35,10 +35,7 @@ impl<F: FieldExt> ExecutionGadget<F> for JumpiGadget<F> {
     const EXECUTION_STATE: ExecutionState = ExecutionState::JUMPI;
 
     fn configure(cb: &mut ConstraintBuilder<F>) -> Self {
-        let destination = RandomLinearCombination::new(
-            cb.query_bytes(),
-            cb.power_of_randomness(),
-        );
+        let destination = cb.query_rlc();
         let condition = cb.query_cell();
 
         // Pop the value from the stack
@@ -94,8 +91,8 @@ impl<F: FieldExt> ExecutionGadget<F> for JumpiGadget<F> {
         region: &mut Region<'_, F>,
         offset: usize,
         block: &Block<F>,
-        _: &Transaction<F>,
-        _: &Call<F>,
+        _: &Transaction,
+        _: &Call,
         step: &ExecStep,
     ) -> Result<(), Error> {
         self.same_context.assign_exec_step(region, offset, step)?;

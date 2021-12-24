@@ -158,6 +158,10 @@ impl GasCost {
     pub const EXTRA_COLD_ACCESS_STORAGE_KEY: Self = Self(2000);
     /// Extra constant cost for accessing account
     pub const EXTRA_COLD_ACCESS_ACCOUNT: Self = Self(2500);
+    /// Constant cost for calling with non-zero value
+    pub const CALL_WITH_VALUE: Self = Self(9000);
+    /// Constant cost for calling empty account
+    pub const CALL_EMPTY_ACCOUNT: Self = Self(25000);
     /// Denominator of quadratic part of memory expansion gas cost
     pub const MEMORY_EXPANSION_QUAD_DENOMINATOR: Self = Self(512);
     /// Coefficient of linear part of memory expansion gas cost

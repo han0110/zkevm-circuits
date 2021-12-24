@@ -91,8 +91,7 @@ async fn test_circuit_input_builder_block_a() {
         code_db.insert(code.clone());
     }
     let constants = get_chain_constants().await;
-    let mut builder =
-        CircuitInputBuilder::new(sdb, code_db, &eth_block, constants);
+    let mut builder = CircuitInputBuilder::new(sdb, code_db, constants);
 
     // 5. For each step in TxExecTraces, gen the associated ops and state
     // circuit inputs

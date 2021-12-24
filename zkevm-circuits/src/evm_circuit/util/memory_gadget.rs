@@ -1,18 +1,23 @@
+use std::convert::TryInto;
+
 use crate::{
     evm_circuit::{
-        param::{N_BYTES_GAS, N_BYTES_MEMORY_SIZE},
+        param::{N_BYTES_GAS, N_BYTES_MEMORY_ADDRESS, N_BYTES_MEMORY_SIZE},
         util::{
             constraint_builder::ConstraintBuilder,
             from_bytes,
             math_gadget::IsZeroGadget,
-            math_gadget::{ConstantDivisionGadget, MaxGadget},
-            sum, MemoryAddress,
+            math_gadget::{ConstantDivisionGadget, MinMaxGadget},
+            sum, Cell, MemoryAddress, Word,
         },
     },
     util::Expr,
 };
 use array_init::array_init;
-use bus_mapping::evm::GasCost;
+use bus_mapping::{
+    eth_types::{ToLittleEndian, U256},
+    evm::GasCost,
+};
 use halo2::plonk::Error;
 use halo2::{arithmetic::FieldExt, circuit::Region, plonk::Expression};
 
@@ -54,44 +59,98 @@ pub(crate) mod address_high {
 
 #[derive(Clone, Debug)]
 pub(crate) struct MemoryAddressGadget<F> {
-    length: MemoryAddress<F>,
-    length_is_zero: IsZeroGadget<F>,
-    offset_bytes: MemoryAddress<F>,
-    address: Expression<F>,
+    memory_offset: Cell<F>,
+    memory_offset_bytes: MemoryAddress<F>,
+    memory_length: MemoryAddress<F>,
+    memory_length_is_zero: IsZeroGadget<F>,
 }
 
 impl<F: FieldExt> MemoryAddressGadget<F> {
     pub(crate) fn construct(
         cb: &mut ConstraintBuilder<F>,
-        offset: Expression<F>,
-        length: MemoryAddress<F>,
+        memory_offset: Cell<F>,
+        memory_length: MemoryAddress<F>,
     ) -> Self {
-        let length_is_zero =
-            IsZeroGadget::construct(cb, sum::expr(&length.cells));
-        let offset_bytes = cb.query_rlc();
+        let memory_length_is_zero =
+            IsZeroGadget::construct(cb, sum::expr(&memory_length.cells));
+        let memory_offset_bytes = cb.query_rlc();
 
-        cb.condition(1.expr() - length_is_zero.expr(), |cb| {
+        let has_length = 1.expr() - memory_length_is_zero.expr();
+        cb.condition(has_length, |cb| {
             cb.require_equal(
-                "Offset decomposition",
-                offset_bytes.expr(),
-                offset,
+                "Offset decomposition into 5 bytes",
+                memory_offset_bytes.expr(),
+                memory_offset.expr(),
             );
         });
 
-        let address = (1.expr() - length_is_zero.expr())
-            * (from_bytes::expr(&offset_bytes.cells)
-                + from_bytes::expr(&length.cells));
-
         Self {
-            length,
-            length_is_zero,
-            offset_bytes,
-            address,
+            memory_offset,
+            memory_offset_bytes,
+            memory_length,
+            memory_length_is_zero,
         }
     }
 
+    pub(crate) fn assign(
+        &self,
+        region: &mut Region<'_, F>,
+        offset: usize,
+        memory_offset: U256,
+        memory_length: U256,
+        randomness: F,
+    ) -> Result<u64, Error> {
+        let memory_offset_bytes = memory_offset.to_le_bytes();
+        let memory_length_bytes = memory_length.to_le_bytes();
+        let memory_length_is_zero = memory_length.is_zero();
+        self.memory_offset.assign(
+            region,
+            offset,
+            Some(Word::random_linear_combine(memory_offset_bytes, randomness)),
+        )?;
+        self.memory_offset_bytes.assign(
+            region,
+            offset,
+            Some(if memory_length_is_zero {
+                [0; 5]
+            } else {
+                memory_offset_bytes[..N_BYTES_MEMORY_ADDRESS]
+                    .try_into()
+                    .unwrap()
+            }),
+        )?;
+        self.memory_length.assign(
+            region,
+            offset,
+            Some(
+                memory_length_bytes[..N_BYTES_MEMORY_ADDRESS]
+                    .try_into()
+                    .unwrap(),
+            ),
+        )?;
+        self.memory_length_is_zero.assign(
+            region,
+            offset,
+            sum::value(&memory_length_bytes),
+        )?;
+        Ok(if memory_length_is_zero {
+            0
+        } else {
+            memory_offset.low_u64() + memory_length.low_u64()
+        })
+    }
+
+    pub(crate) fn offset(&self) -> Expression<F> {
+        (1.expr() - self.memory_length_is_zero.expr())
+            * from_bytes::expr(&self.memory_offset_bytes.cells)
+    }
+
+    pub(crate) fn length(&self) -> Expression<F> {
+        from_bytes::expr(&self.memory_length.cells)
+    }
+
     pub(crate) fn address(&self) -> Expression<F> {
-        self.address.expr()
+        self.offset() + self.length()
     }
 }
 
@@ -141,7 +200,7 @@ pub(crate) struct MemoryExpansionGadget<
     const N_BYTES_MEMORY_SIZE: usize,
 > {
     memory_sizes: [MemorySizeGadget<F>; N],
-    max_memory_sizes: [MaxGadget<F, N_BYTES_MEMORY_SIZE>; N],
+    max_memory_sizes: [MinMaxGadget<F, N_BYTES_MEMORY_SIZE>; N],
     curr_quad_memory_cost: ConstantDivisionGadget<F, N_BYTES_GAS>,
     next_quad_memory_cost: ConstantDivisionGadget<F, N_BYTES_GAS>,
     next_memory_size: Expression<F>,
@@ -171,14 +230,14 @@ impl<F: FieldExt, const N: usize, const N_BYTES_MEMORY_SIZE: usize>
         // The memory size needs to be updated if this memory access
         // requires expanding the memory.
         // `next_memory_size < 256**MAX_MEMORY_SIZE_IN_BYTES`
-        let mut next_memory_size = curr_memory_size.expr();
+        let mut next_memory_size = curr_memory_size.clone();
         let max_memory_sizes = array_init(|idx| {
-            let max_memory_size = MaxGadget::construct(
+            let max_memory_size = MinMaxGadget::construct(
                 cb,
-                next_memory_size.expr(),
+                next_memory_size.clone(),
                 memory_sizes[idx].expr(),
             );
-            next_memory_size = max_memory_size.expr();
+            next_memory_size = max_memory_size.max();
             max_memory_size
         });
 
@@ -187,12 +246,12 @@ impl<F: FieldExt, const N: usize, const N_BYTES_MEMORY_SIZE: usize>
         // 256**MAX_QUAD_COST_IN_BYTES`.
         let curr_quad_memory_cost = ConstantDivisionGadget::construct(
             cb,
-            curr_memory_size.expr() * curr_memory_size.expr(),
+            curr_memory_size.clone() * curr_memory_size.clone(),
             GasCost::MEMORY_EXPANSION_QUAD_DENOMINATOR.as_u64(),
         );
         let next_quad_memory_cost = ConstantDivisionGadget::construct(
             cb,
-            next_memory_size.expr() * next_memory_size.expr(),
+            next_memory_size.clone() * next_memory_size.clone(),
             GasCost::MEMORY_EXPANSION_QUAD_DENOMINATOR.as_u64(),
         );
 
@@ -201,7 +260,7 @@ impl<F: FieldExt, const N: usize, const N_BYTES_MEMORY_SIZE: usize>
         // costs. `gas_cost <=
         // GAS_MEM*256**MAX_MEMORY_SIZE_IN_BYTES + 256**MAX_QUAD_COST_IN_BYTES`
         let gas_cost = GasCost::MEMORY_EXPANSION_LINEAR_COEFF.expr()
-            * (next_memory_size.expr() - curr_memory_size)
+            * (next_memory_size.clone() - curr_memory_size)
             + (next_quad_memory_cost.quotient()
                 - curr_quad_memory_cost.quotient());
 
@@ -217,12 +276,12 @@ impl<F: FieldExt, const N: usize, const N_BYTES_MEMORY_SIZE: usize>
 
     pub(crate) fn next_memory_size(&self) -> Expression<F> {
         // Return the new memory size
-        self.next_memory_size.expr()
+        self.next_memory_size.clone()
     }
 
     pub(crate) fn gas_cost(&self) -> Expression<F> {
         // Return the gas cost
-        self.gas_cost.expr()
+        self.gas_cost.clone()
     }
 
     pub(crate) fn assign(
@@ -247,14 +306,13 @@ impl<F: FieldExt, const N: usize, const N_BYTES_MEMORY_SIZE: usize>
         for (max_memory_sizes, memory_size) in
             self.max_memory_sizes.iter().zip(memory_sizes.iter())
         {
-            next_memory_size = max_memory_sizes
-                .assign(
-                    region,
-                    offset,
-                    F::from(next_memory_size as u64),
-                    F::from(*memory_size),
-                )?
-                .get_lower_128() as u64;
+            let (_, max) = max_memory_sizes.assign(
+                region,
+                offset,
+                F::from(next_memory_size as u64),
+                F::from(*memory_size),
+            )?;
+            next_memory_size = max.get_lower_128() as u64;
         }
 
         // Calculate the quad gas cost for the memory size

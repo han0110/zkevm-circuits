@@ -115,10 +115,11 @@
 //! let eth_block = mock::new_block();
 //! let eth_tx = mock::new_tx(&eth_block);
 //! let mut sdb = StateDB::new();
+//! sdb.set_account(&eth_tx.from, state_db::Account::zero());
 //! sdb.set_account(&Address::zero(), state_db::Account::zero());
 //!
 //! let mut builder =
-//!     CircuitInputBuilder::new(sdb, CodeDB::new(), &eth_block, ctants);
+//!     CircuitInputBuilder::new(sdb, CodeDB::new(), ctants);
 //!
 //! let geth_steps: Vec<GethExecStep> = serde_json::from_str(input_trace).unwrap();
 //! let geth_trace = GethExecTrace {

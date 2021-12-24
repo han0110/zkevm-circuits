@@ -606,24 +606,30 @@ impl<F: FieldExt, const N_BYTES: usize> ConstantDivisionGadget<F, N_BYTES> {
 /// lhs and rhs `< 256**N_BYTES`
 /// `N_BYTES` is required to be `<= MAX_N_BYTES_INTEGER`.
 #[derive(Clone, Debug)]
-pub struct MaxGadget<F, const N_BYTES: usize> {
+pub struct MinMaxGadget<F, const N_BYTES: usize> {
     lt: LtGadget<F, N_BYTES>,
+    min: Expression<F>,
     max: Expression<F>,
 }
 
-impl<F: FieldExt, const N_BYTES: usize> MaxGadget<F, N_BYTES> {
+impl<F: FieldExt, const N_BYTES: usize> MinMaxGadget<F, N_BYTES> {
     pub(crate) fn construct(
         cb: &mut ConstraintBuilder<F>,
         lhs: Expression<F>,
         rhs: Expression<F>,
     ) -> Self {
         let lt = LtGadget::construct(cb, lhs.clone(), rhs.clone());
-        let max = select::expr(lt.expr(), rhs, lhs);
+        let max = select::expr(lt.expr(), rhs.clone(), lhs.clone());
+        let min = select::expr(lt.expr(), lhs, rhs);
 
-        Self { lt, max }
+        Self { lt, min, max }
     }
 
-    pub(crate) fn expr(&self) -> Expression<F> {
+    pub(crate) fn min(&self) -> Expression<F> {
+        self.min.clone()
+    }
+
+    pub(crate) fn max(&self) -> Expression<F> {
         self.max.clone()
     }
 
@@ -633,8 +639,12 @@ impl<F: FieldExt, const N_BYTES: usize> MaxGadget<F, N_BYTES> {
         offset: usize,
         lhs: F,
         rhs: F,
-    ) -> Result<F, Error> {
+    ) -> Result<(F, F), Error> {
         let (lt, _) = self.lt.assign(region, offset, lhs, rhs)?;
-        Ok(select::value(lt, rhs, lhs))
+        Ok(if lt.is_zero_vartime() {
+            (rhs, lhs)
+        } else {
+            (lhs, rhs)
+        })
     }
 }

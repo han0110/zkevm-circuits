@@ -1,17 +1,16 @@
 //! This module generates traces by connecting to an external tracer
 use crate::eth_types::{
-    self, fix_geth_trace_memory_size, Address, Block, Bytes, GethExecStep,
-    Hash, Word, U64,
+    self, Address, Block, Bytes, GethExecTrace, Hash, Word, U64,
 };
 use crate::Error;
 use geth_utils;
 use serde::Serialize;
+use std::collections::HashMap;
 
 /// Definition of all of the constants related to an Ethereum block and
 /// chain to be used as setup for the external tracer.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct BlockConstants {
-    hash: Hash,
     coinbase: Address,
     timestamp: Word,
     number: U64,
@@ -19,6 +18,7 @@ pub struct BlockConstants {
     gas_limit: Word,
     chain_id: Word,
     base_fee: Word,
+    history_hashes: HashMap<u64, Hash>,
 }
 
 impl BlockConstants {
@@ -26,17 +26,17 @@ impl BlockConstants {
     pub fn from_eth_block<TX>(
         block: &Block<TX>,
         chain_id: &Word,
-        &coinbase: &Address,
+        history_hashes: HashMap<u64, Hash>,
     ) -> Self {
         Self {
-            hash: block.hash.unwrap(),
-            coinbase,
+            coinbase: block.author,
             timestamp: block.timestamp,
             number: block.number.unwrap(),
             difficulty: block.difficulty,
             gas_limit: block.gas_limit,
             chain_id: *chain_id,
             base_fee: block.base_fee_per_gas.unwrap(),
+            history_hashes,
         }
     }
 }
@@ -45,7 +45,6 @@ impl BlockConstants {
     #[allow(clippy::too_many_arguments)]
     /// Generates a new `BlockConstants` instance from it's fields.
     pub fn new(
-        hash: Hash,
         coinbase: Address,
         timestamp: Word,
         number: U64,
@@ -53,9 +52,9 @@ impl BlockConstants {
         gas_limit: Word,
         chain_id: Word,
         base_fee: Word,
+        history_hashes: HashMap<u64, Hash>,
     ) -> BlockConstants {
         BlockConstants {
-            hash,
             coinbase,
             timestamp,
             number,
@@ -63,48 +62,74 @@ impl BlockConstants {
             gas_limit,
             chain_id,
             base_fee,
+            history_hashes,
         }
     }
 }
 
 /// Definition of all of the constants related to an Ethereum transaction.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct Transaction {
-    /// Origin Address
-    pub origin: Address,
+    /// From Address
+    pub from: Address,
+    /// To Address
+    pub to: Option<Address>,
+    /// Nonce
+    pub nonce: Word,
     /// Gas Limit
     pub gas_limit: Word,
-    /// Target Address
-    pub target: Address,
+    /// Gas Limit
+    pub value: Word,
+    /// Gas Price
+    pub gas_price: Word,
+    /// Gas fee cap
+    pub gas_fee_cap: Word,
+    /// Gas tip cap
+    pub gas_tip_cap: Word,
+    /// Call data
+    pub call_data: Bytes,
+    /// Access list
+    pub access_list: Option<eth_types::AccessList>,
 }
 
 impl Transaction {
     /// Create Self from a web3 transaction
     pub fn from_eth_tx(tx: &eth_types::Transaction) -> Self {
         Self {
-            origin: tx.from,
+            from: tx.from,
+            to: tx.to,
+            nonce: tx.nonce,
             gas_limit: tx.gas,
-            target: tx.to.unwrap(),
+            value: tx.value,
+            gas_price: tx.gas_price.unwrap_or_default(),
+            gas_fee_cap: tx.max_priority_fee_per_gas.unwrap_or_default(),
+            gas_tip_cap: tx.max_fee_per_gas.unwrap_or_default(),
+            call_data: tx.input.clone(),
+            access_list: tx.access_list.clone(),
         }
     }
 }
 
 /// Definition of all of the data related to an account.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct Account {
     /// Address
     pub address: Address,
+    /// nonce
+    pub nonce: Word,
     /// Balance
     pub balance: Word,
     /// EVM Code
     pub code: Bytes,
+    /// Storage
+    pub storage: HashMap<Word, Word>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct GethConfig {
     block_constants: BlockConstants,
+    accounts: HashMap<Address, Account>,
     transaction: Transaction,
-    accounts: Vec<Account>,
 }
 
 /// Creates a trace for the specified config
@@ -112,21 +137,23 @@ pub fn trace(
     block_constants: &BlockConstants,
     tx: &Transaction,
     accounts: &[Account],
-) -> Result<Vec<GethExecStep>, Error> {
+) -> Result<GethExecTrace, Error> {
     let geth_config = GethConfig {
         block_constants: block_constants.clone(),
+        accounts: accounts
+            .iter()
+            .map(|account| (account.address, account.clone()))
+            .collect(),
         transaction: tx.clone(),
-        accounts: accounts.to_vec(),
     };
 
     // Get the trace
     let trace_string =
         geth_utils::trace(&serde_json::to_string(&geth_config).unwrap())
-            .map_err(|_| Error::TracingError)?;
+            .map_err(Error::TracingError)?;
 
-    let mut trace: Vec<GethExecStep> =
+    let trace =
         serde_json::from_str(&trace_string).map_err(Error::SerdeError)?;
-    fix_geth_trace_memory_size(&mut trace);
     Ok(trace)
 }
 
