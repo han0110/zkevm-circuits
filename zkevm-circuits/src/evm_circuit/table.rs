@@ -163,10 +163,10 @@ pub enum AccountFieldTag {
     CodeHash,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CallContextFieldTag {
     RwCounterEndOfReversion = 1,
-    CallerCallId,
+    CallerId,
     TxId,
     Depth,
     CallerAddress,

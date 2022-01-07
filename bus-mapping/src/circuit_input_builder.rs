@@ -12,8 +12,7 @@ use crate::exec_trace::OperationRef;
 use crate::geth_errors::*;
 use crate::operation::container::OperationContainer;
 use crate::operation::{
-    AccountOp, MemoryOp, Op, OpEnum, Operation, StackOp, StorageOp,
-    TxAccessListAccountOp, TxAccessListAccountStorageOp, RW,
+    AccountField, MemoryOp, Op, OpEnum, Operation, StackOp, RW,
 };
 use crate::state_db::{CodeDB, StateDB};
 use crate::Error;
@@ -259,6 +258,8 @@ pub struct Call {
     pub is_persistent: bool,
     /// This call ends successfully or not
     pub is_success: bool,
+    /// This rw_counter at the end of reversion
+    pub rw_counter_end_of_reversion: usize,
     /// Address of caller
     pub caller_address: Address,
     /// Address where this call is being executed
@@ -293,33 +294,19 @@ impl Call {
 #[derive(Debug, Default)]
 pub struct CallContext {
     /// State Write Counter tracks the count of state write operations in the
-    /// call.  When a subcall in this call succeeds, the `swc` increases by the
+    /// call. When a subcall in this call succeeds, the `swc` increases by the
     /// number of successful state writes in the subcall.
     pub swc: usize,
-    /// Operations of StorageOp
-    pub storage: Vec<StorageOp>,
-    /// Operations of TxAccessListAccountOp
-    pub tx_access_list_account: Vec<TxAccessListAccountOp>,
-    /// Operations of TxAccessListAccountStorageOp
-    pub tx_access_list_account_storage: Vec<TxAccessListAccountStorageOp>,
-    /// Operations of AccountOp
-    pub account: Vec<AccountOp>,
+    /// Operations of state write
+    pub operations: Vec<OpEnum>,
+    /// Success callees' index and swc of their caller when they are called.
+    pub success_callees: Vec<(usize, usize)>,
 }
 
 impl CallContext {
     /// Stage a reversed operation for reversion in the future.
-    pub fn push_op_rev<T: Op>(&mut self, op: T) {
-        match op.into_enum() {
-            OpEnum::Storage(op) => self.storage.push(op),
-            OpEnum::TxAccessListAccount(op) => {
-                self.tx_access_list_account.push(op)
-            }
-            OpEnum::TxAccessListAccountStorage(op) => {
-                self.tx_access_list_account_storage.push(op)
-            }
-            OpEnum::Account(op) => self.account.push(op),
-            _ => unreachable!(),
-        }
+    pub fn push_op_reverted<T: Op>(&mut self, op: T) {
+        self.operations.push(op.into_enum());
         self.swc += 1;
     }
 }
@@ -433,6 +420,7 @@ impl Transaction {
                 is_root: true,
                 is_persistent: is_success,
                 is_success,
+                rw_counter_end_of_reversion: 0,
                 caller_address: eth_tx.from,
                 address,
                 code_source: CodeSource::Address(address),
@@ -454,6 +442,7 @@ impl Transaction {
                 is_root: true,
                 is_persistent: is_success,
                 is_success,
+                rw_counter_end_of_reversion: 0,
                 caller_address: eth_tx.from,
                 address: get_contract_address(eth_tx.from, eth_tx.nonce),
                 code_source: CodeSource::Tx,
@@ -744,6 +733,7 @@ impl<'a> CircuitInputStateRef<'a> {
             is_root: false,
             is_persistent: caller.is_persistent && is_success,
             is_success,
+            rw_counter_end_of_reversion: 0,
             caller_address,
             address,
             code_source,
@@ -762,25 +752,70 @@ impl<'a> CircuitInputStateRef<'a> {
 
     /// Handle a return step caused by any opcode that causes a return to the
     /// previous call context.
-    fn handle_return(
-        &mut self,
-        step: &GethExecStep,
-        next_step: &GethExecStep,
-    ) -> Result<(), Error> {
-        if self.tx_ctx.call_stack.len() == 1 {
-            return Err(Error::InvalidGethExecStep(
-                "handle_tx: call stack will be empty",
-                Box::new(step.clone()),
-            ));
-        }
-        let (_, call_ctx) = self
-            .tx_ctx
-            .pop_call_index_ctx()
-            .expect("call stack is empty");
-        // If the return was successful, accumulate the swc from the
-        // subcall.
-        if !next_step.stack.last()?.is_zero() {
-            self.tx_ctx.call_ctx_mut().swc += call_ctx.swc;
+    fn handle_return(&mut self, is_success: bool) -> Result<(), Error> {
+        let (call_idx, call_ctx) = self.tx_ctx.pop_call_index_ctx().ok_or(
+            Error::InvalidGethExecTrace("handle_return: call stack is empty"),
+        )?;
+        if is_success {
+            // If the return was successful, accumulate the success callees and
+            // swc.
+            if let Some((_, caller_ctx)) = self.tx_ctx.call_stack.last_mut() {
+                caller_ctx.success_callees.extend(call_ctx.success_callees);
+                caller_ctx.success_callees.push((call_idx, caller_ctx.swc));
+                caller_ctx.swc += call_ctx.swc;
+                caller_ctx.operations.extend(call_ctx.operations);
+            }
+        } else {
+            // Apply state reversion and push the operations.
+            for op in call_ctx.operations.into_iter().rev() {
+                match op {
+                    OpEnum::Storage(op) => {
+                        let (_, account) =
+                            self.sdb.get_storage_mut(&op.address, &op.key);
+                        *account = op.value;
+                        self.push_op(op);
+                    }
+                    OpEnum::TxAccessListAccount(op) => {
+                        if !op.value {
+                            self.sdb
+                                .remove_account_from_access_list(&op.address);
+                        }
+                        self.push_op(op);
+                    }
+                    OpEnum::TxAccessListAccountStorage(op) => {
+                        if !op.value {
+                            self.sdb.remove_account_storage_from_access_list(
+                                &(op.address, op.key),
+                            );
+                        }
+                        self.push_op(op);
+                    }
+                    OpEnum::Account(op) => {
+                        let (_, account) =
+                            self.sdb.get_account_mut(&op.address);
+                        match op.field {
+                            AccountField::Nonce => account.nonce = op.value,
+                            AccountField::Balance => account.balance = op.value,
+                            AccountField::CodeHash => {
+                                account.code_hash =
+                                    op.value.to_be_bytes().into()
+                            }
+                        }
+                        self.push_op(op);
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            // Set rw_counter_end_of_reversion of current call and success
+            // callees.
+            let rw_counter_end_of_reversion =
+                usize::from(self.block_ctx.rwc) - 1;
+            self.tx.calls[call_idx].rw_counter_end_of_reversion =
+                rw_counter_end_of_reversion;
+            for (callee_idx, swc) in call_ctx.success_callees {
+                self.tx.calls[callee_idx].rw_counter_end_of_reversion =
+                    rw_counter_end_of_reversion - swc;
+            }
         }
         Ok(())
     }
@@ -819,7 +854,7 @@ impl<'a> CircuitInputStateRef<'a> {
                     _ => {
                         return Err(Error::UnexpectedExecStepError(
                             "call failure without return",
-                            Box::new(step.clone()),
+                            step.clone(),
                         ));
                     }
                 }));
@@ -846,13 +881,13 @@ impl<'a> CircuitInputStateRef<'a> {
                     } else {
                         return Err(Error::UnexpectedExecStepError(
                             "failure in RETURN from {CREATE, CREATE2}",
-                            Box::new(step.clone()),
+                            step.clone(),
                         ));
                     }
                 } else {
                     return Err(Error::UnexpectedExecStepError(
                         "failure in RETURN",
-                        Box::new(step.clone()),
+                        step.clone(),
                     ));
                 }
             }
@@ -869,7 +904,7 @@ impl<'a> CircuitInputStateRef<'a> {
         {
             return Err(Error::UnexpectedExecStepError(
                 "success result without {RETURN, STOP}",
-                Box::new(step.clone()),
+                step.clone(),
             ));
         }
 
@@ -924,7 +959,7 @@ impl<'a> CircuitInputStateRef<'a> {
 
             return Err(Error::UnexpectedExecStepError(
                 "*CALL*/CREATE* code not executed",
-                Box::new(step.clone()),
+                step.clone(),
             ));
         }
 
@@ -1039,7 +1074,8 @@ impl<'a> CircuitInputBuilder {
             }
         }
 
-        let mut tx = self.new_tx(eth_tx, !geth_trace.failed)?;
+        let tx_is_success = !geth_trace.failed;
+        let mut tx = self.new_tx(eth_tx, tx_is_success)?;
         let mut tx_ctx = TransactionContext::new(eth_tx);
         for (index, geth_step) in geth_trace.struct_logs.iter().enumerate() {
             let geth_next_step = geth_trace.struct_logs.get(index + 1);
@@ -1067,10 +1103,18 @@ impl<'a> CircuitInputBuilder {
             )?;
 
             // Handle return
-            if let Some(geth_next_step) = geth_next_step {
-                if geth_step.depth - 1 == geth_next_step.depth {
-                    state_ref.handle_return(geth_step, geth_next_step)?;
+            match geth_next_step {
+                Some(geth_next_step)
+                    if geth_next_step.depth == geth_step.depth - 1 =>
+                {
+                    state_ref.handle_return(
+                        !geth_next_step.stack.last()?.is_zero(),
+                    )?;
                 }
+                None => {
+                    state_ref.handle_return(tx_is_success)?;
+                }
+                _ => {}
             }
 
             tx.steps.push(step);
@@ -1365,7 +1409,7 @@ pub fn gen_state_access_trace<TX>(
                 if call_stack.len() == 1 {
                     return Err(Error::InvalidGethExecStep(
                         "gen_state_access_trace: call stack will be empty",
-                        Box::new(step.clone()),
+                        step.clone(),
                     ));
                 }
                 call_stack.pop().expect("call stack is empty");
@@ -1439,6 +1483,7 @@ mod tracer_tests {
             is_root: false,
             is_persistent: false,
             is_success: false,
+            rw_counter_end_of_reversion: 0,
             caller_address: *ADDR_A,
             address: *ADDR_B,
             code_source: CodeSource::Memory,

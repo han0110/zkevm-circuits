@@ -253,169 +253,6 @@ impl std::ops::Index<(RwTableTag, usize)> for RwMap {
     }
 }
 
-impl From<&operation::OperationContainer> for RwMap {
-    fn from(container: &operation::OperationContainer) -> Self {
-        let mut rws = HashMap::default();
-
-        // TODO:
-        rws.insert(RwTableTag::TxAccessListAccountStorage, vec![]);
-        rws.insert(RwTableTag::TxRefund, vec![]);
-        rws.insert(RwTableTag::AccountStorage, vec![]);
-        rws.insert(RwTableTag::AccountDestructed, vec![]);
-
-        rws.insert(
-            RwTableTag::TxAccessListAccount,
-            container
-                .tx_access_list_account
-                .iter()
-                .map(|op| Rw::TxAccessListAccount {
-                    rw_counter: op.rwc().into(),
-                    is_write: true,
-                    tx_id: op.op().tx_id,
-                    account_address: op.op().address,
-                    value: op.op().value,
-                    value_prev: op.op().value_prev,
-                })
-                .collect(),
-        );
-        rws.insert(
-            RwTableTag::Account,
-            container
-                .account
-                .iter()
-                .map(|op| Rw::Account {
-                    rw_counter: op.rwc().into(),
-                    is_write: op.op().rw.is_write(),
-                    account_address: op.op().address,
-                    field_tag: match op.op().field {
-                        AccountField::Nonce => AccountFieldTag::Nonce,
-                        AccountField::Balance => AccountFieldTag::Balance,
-                        AccountField::CodeHash => AccountFieldTag::CodeHash,
-                    },
-                    value: op.op().value,
-                    value_prev: op.op().value_prev,
-                })
-                .collect(),
-        );
-        rws.insert(
-            RwTableTag::CallContext,
-            container
-                .call_context
-                .iter()
-                .map(|op| Rw::CallContext {
-                    rw_counter: op.rwc().into(),
-                    is_write: op.op().rw.is_write(),
-                    call_id: op.op().call_id,
-                    field_tag: match op.op().field {
-                        CallContextField::RwCounterEndOfReversion => {
-                            CallContextFieldTag::RwCounterEndOfReversion
-                        }
-                        CallContextField::CallerCallId => {
-                            CallContextFieldTag::CallerCallId
-                        }
-                        CallContextField::TxId => CallContextFieldTag::TxId,
-                        CallContextField::Depth => CallContextFieldTag::Depth,
-                        CallContextField::CallerAddress => {
-                            CallContextFieldTag::CallerAddress
-                        }
-                        CallContextField::CalleeAddress => {
-                            CallContextFieldTag::CalleeAddress
-                        }
-                        CallContextField::CallDataOffset => {
-                            CallContextFieldTag::CallDataOffset
-                        }
-                        CallContextField::CallDataLength => {
-                            CallContextFieldTag::CallDataLength
-                        }
-                        CallContextField::ReturnDataOffset => {
-                            CallContextFieldTag::ReturnDataOffset
-                        }
-                        CallContextField::ReturnDataLength => {
-                            CallContextFieldTag::ReturnDataLength
-                        }
-                        CallContextField::Value => CallContextFieldTag::Value,
-                        CallContextField::IsSuccess => {
-                            CallContextFieldTag::IsSuccess
-                        }
-                        CallContextField::IsPersistent => {
-                            CallContextFieldTag::IsPersistent
-                        }
-                        CallContextField::IsStatic => {
-                            CallContextFieldTag::IsStatic
-                        }
-                        CallContextField::LastCalleeId => {
-                            CallContextFieldTag::LastCalleeId
-                        }
-                        CallContextField::LastCalleeReturnDataOffset => {
-                            CallContextFieldTag::LastCalleeReturnDataOffset
-                        }
-                        CallContextField::LastCalleeReturnDataLength => {
-                            CallContextFieldTag::LastCalleeReturnDataLength
-                        }
-                        CallContextField::IsRoot => CallContextFieldTag::IsRoot,
-                        CallContextField::IsCreate => {
-                            CallContextFieldTag::IsCreate
-                        }
-                        CallContextField::CodeSource => {
-                            CallContextFieldTag::CodeSource
-                        }
-                        CallContextField::ProgramCounter => {
-                            CallContextFieldTag::ProgramCounter
-                        }
-                        CallContextField::StackPointer => {
-                            CallContextFieldTag::StackPointer
-                        }
-                        CallContextField::GasLeft => {
-                            CallContextFieldTag::GasLeft
-                        }
-                        CallContextField::MemorySize => {
-                            CallContextFieldTag::MemorySize
-                        }
-                        CallContextField::StateWriteCounter => {
-                            CallContextFieldTag::StateWriteCounter
-                        }
-                    },
-                    value: op.op().value,
-                })
-                .collect(),
-        );
-        rws.insert(
-            RwTableTag::Stack,
-            container
-                .stack
-                .iter()
-                .map(|op| Rw::Stack {
-                    rw_counter: op.rwc().into(),
-                    is_write: op.op().rw().is_write(),
-                    call_id: op.op().call_id(),
-                    stack_pointer: usize::from(*op.op().address()),
-                    value: *op.op().value(),
-                })
-                .collect(),
-        );
-        rws.insert(
-            RwTableTag::Memory,
-            container
-                .memory
-                .iter()
-                .map(|op| Rw::Memory {
-                    rw_counter: op.rwc().into(),
-                    is_write: op.op().rw().is_write(),
-                    call_id: op.op().call_id(),
-                    memory_address: u64::from_le_bytes(
-                        op.op().address().to_le_bytes()[..8]
-                            .try_into()
-                            .unwrap(),
-                    ),
-                    byte: op.op().value(),
-                })
-                .collect(),
-        );
-
-        Self(rws)
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum Rw {
     TxAccessListAccount {
@@ -650,6 +487,169 @@ impl Rw {
     }
 }
 
+impl From<&operation::OperationContainer> for RwMap {
+    fn from(container: &operation::OperationContainer) -> Self {
+        let mut rws = HashMap::default();
+
+        // TODO:
+        rws.insert(RwTableTag::TxAccessListAccountStorage, vec![]);
+        rws.insert(RwTableTag::TxRefund, vec![]);
+        rws.insert(RwTableTag::AccountStorage, vec![]);
+        rws.insert(RwTableTag::AccountDestructed, vec![]);
+
+        rws.insert(
+            RwTableTag::TxAccessListAccount,
+            container
+                .tx_access_list_account
+                .iter()
+                .map(|op| Rw::TxAccessListAccount {
+                    rw_counter: op.rwc().into(),
+                    is_write: true,
+                    tx_id: op.op().tx_id,
+                    account_address: op.op().address,
+                    value: op.op().value,
+                    value_prev: op.op().value_prev,
+                })
+                .collect(),
+        );
+        rws.insert(
+            RwTableTag::Account,
+            container
+                .account
+                .iter()
+                .map(|op| Rw::Account {
+                    rw_counter: op.rwc().into(),
+                    is_write: op.op().rw.is_write(),
+                    account_address: op.op().address,
+                    field_tag: match op.op().field {
+                        AccountField::Nonce => AccountFieldTag::Nonce,
+                        AccountField::Balance => AccountFieldTag::Balance,
+                        AccountField::CodeHash => AccountFieldTag::CodeHash,
+                    },
+                    value: op.op().value,
+                    value_prev: op.op().value_prev,
+                })
+                .collect(),
+        );
+        rws.insert(
+            RwTableTag::CallContext,
+            container
+                .call_context
+                .iter()
+                .map(|op| Rw::CallContext {
+                    rw_counter: op.rwc().into(),
+                    is_write: op.op().rw.is_write(),
+                    call_id: op.op().call_id,
+                    field_tag: match op.op().field {
+                        CallContextField::RwCounterEndOfReversion => {
+                            CallContextFieldTag::RwCounterEndOfReversion
+                        }
+                        CallContextField::CallerId => {
+                            CallContextFieldTag::CallerId
+                        }
+                        CallContextField::TxId => CallContextFieldTag::TxId,
+                        CallContextField::Depth => CallContextFieldTag::Depth,
+                        CallContextField::CallerAddress => {
+                            CallContextFieldTag::CallerAddress
+                        }
+                        CallContextField::CalleeAddress => {
+                            CallContextFieldTag::CalleeAddress
+                        }
+                        CallContextField::CallDataOffset => {
+                            CallContextFieldTag::CallDataOffset
+                        }
+                        CallContextField::CallDataLength => {
+                            CallContextFieldTag::CallDataLength
+                        }
+                        CallContextField::ReturnDataOffset => {
+                            CallContextFieldTag::ReturnDataOffset
+                        }
+                        CallContextField::ReturnDataLength => {
+                            CallContextFieldTag::ReturnDataLength
+                        }
+                        CallContextField::Value => CallContextFieldTag::Value,
+                        CallContextField::IsSuccess => {
+                            CallContextFieldTag::IsSuccess
+                        }
+                        CallContextField::IsPersistent => {
+                            CallContextFieldTag::IsPersistent
+                        }
+                        CallContextField::IsStatic => {
+                            CallContextFieldTag::IsStatic
+                        }
+                        CallContextField::LastCalleeId => {
+                            CallContextFieldTag::LastCalleeId
+                        }
+                        CallContextField::LastCalleeReturnDataOffset => {
+                            CallContextFieldTag::LastCalleeReturnDataOffset
+                        }
+                        CallContextField::LastCalleeReturnDataLength => {
+                            CallContextFieldTag::LastCalleeReturnDataLength
+                        }
+                        CallContextField::IsRoot => CallContextFieldTag::IsRoot,
+                        CallContextField::IsCreate => {
+                            CallContextFieldTag::IsCreate
+                        }
+                        CallContextField::CodeSource => {
+                            CallContextFieldTag::CodeSource
+                        }
+                        CallContextField::ProgramCounter => {
+                            CallContextFieldTag::ProgramCounter
+                        }
+                        CallContextField::StackPointer => {
+                            CallContextFieldTag::StackPointer
+                        }
+                        CallContextField::GasLeft => {
+                            CallContextFieldTag::GasLeft
+                        }
+                        CallContextField::MemorySize => {
+                            CallContextFieldTag::MemorySize
+                        }
+                        CallContextField::StateWriteCounter => {
+                            CallContextFieldTag::StateWriteCounter
+                        }
+                    },
+                    value: op.op().value,
+                })
+                .collect(),
+        );
+        rws.insert(
+            RwTableTag::Stack,
+            container
+                .stack
+                .iter()
+                .map(|op| Rw::Stack {
+                    rw_counter: op.rwc().into(),
+                    is_write: op.op().rw().is_write(),
+                    call_id: op.op().call_id(),
+                    stack_pointer: usize::from(*op.op().address()),
+                    value: *op.op().value(),
+                })
+                .collect(),
+        );
+        rws.insert(
+            RwTableTag::Memory,
+            container
+                .memory
+                .iter()
+                .map(|op| Rw::Memory {
+                    rw_counter: op.rwc().into(),
+                    is_write: op.op().rw().is_write(),
+                    call_id: op.op().call_id(),
+                    memory_address: u64::from_le_bytes(
+                        op.op().address().to_le_bytes()[..8]
+                            .try_into()
+                            .unwrap(),
+                    ),
+                    byte: op.op().value(),
+                })
+                .collect(),
+        );
+
+        Self(rws)
+    }
+}
+
 impl From<&bus_mapping::circuit_input_builder::ExecStep> for ExecutionState {
     fn from(step: &bus_mapping::circuit_input_builder::ExecStep) -> Self {
         // TODO: error reporting. (errors are defined in
@@ -671,7 +671,10 @@ impl From<&bus_mapping::circuit_input_builder::ExecStep> for ExecutionState {
             OpcodeId::GT => ExecutionState::CMP,
             OpcodeId::LT => ExecutionState::CMP,
             OpcodeId::SIGNEXTEND => ExecutionState::SIGNEXTEND,
-            OpcodeId::STOP => ExecutionState::STOP,
+            // TODO: Convert REVERT and RETURN to their own ExecutionState.
+            OpcodeId::STOP | OpcodeId::REVERT | OpcodeId::RETURN => {
+                ExecutionState::STOP
+            }
             OpcodeId::AND => ExecutionState::BITWISE,
             OpcodeId::XOR => ExecutionState::BITWISE,
             OpcodeId::OR => ExecutionState::BITWISE,
@@ -771,7 +774,7 @@ fn tx_convert(
                     ) => CodeSource::Account(call.code_hash.to_word()),
                     _ => unimplemented!(),
                 },
-                rw_counter_end_of_reversion: 0,
+                rw_counter_end_of_reversion: call.rw_counter_end_of_reversion,
                 caller_call_id: 0,
                 depth: call.depth,
                 caller_address: call.caller_address,
@@ -794,10 +797,39 @@ pub fn block_convert(
     block: &bus_mapping::circuit_input_builder::Block,
     code_db: &bus_mapping::state_db::CodeDB,
 ) -> Block<Fp> {
+    let mut rws = RwMap::from(&block.container);
+    let txs = block.txs().iter().map(tx_convert).collect::<Vec<_>>();
+
+    let call_rw_counter_end_of_reversion = txs
+        .iter()
+        .flat_map(|tx| {
+            tx.calls
+                .iter()
+                .map(|call| (call.id, call.rw_counter_end_of_reversion))
+        })
+        .collect::<HashMap<usize, usize>>();
+
+    // Update rw access to rw_counter_end_of_reversion to correct one.
+    for rw in rws.0.get_mut(&RwTableTag::CallContext).unwrap() {
+        match rw {
+            Rw::CallContext {
+                call_id,
+                value,
+                field_tag,
+                ..
+            } if *field_tag == CallContextFieldTag::RwCounterEndOfReversion => {
+                *value = Word::from(
+                    *call_rw_counter_end_of_reversion.get(call_id).unwrap(),
+                );
+            }
+            _ => {}
+        }
+    }
+
     Block {
         randomness: Fp::rand(),
-        rws: RwMap::from(&block.container),
-        txs: block.txs().iter().map(tx_convert).collect(),
+        rws,
+        txs,
         bytecodes: block
             .txs()
             .iter()

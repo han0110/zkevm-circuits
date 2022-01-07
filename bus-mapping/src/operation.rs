@@ -581,8 +581,8 @@ impl Op for AccountDestructedOp {
 pub enum CallContextField {
     /// RwCounterEndOfReversion
     RwCounterEndOfReversion,
-    /// CallerCallId
-    CallerCallId,
+    /// CallerId
+    CallerId,
     /// TxId
     TxId,
     /// Depth

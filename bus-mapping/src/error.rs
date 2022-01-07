@@ -38,10 +38,12 @@ pub enum Error {
     AccountNotFound(Address),
     /// Storage key not found in the StateDB
     StorageKeyNotFound(Address, Word),
+    /// Invalid [`GethExecTrace`] due to an unexpected form of it.
+    InvalidGethExecTrace(&'static str),
     /// Unable to figure out error at a [`GethExecStep`]
-    UnexpectedExecStepError(&'static str, Box<GethExecStep>),
+    UnexpectedExecStepError(&'static str, GethExecStep),
     /// Invalid [`GethExecStep`] due to an invalid/unexpected value in it.
-    InvalidGethExecStep(&'static str, Box<GethExecStep>),
+    InvalidGethExecStep(&'static str, GethExecStep),
 }
 
 impl From<ProviderError> for Error {

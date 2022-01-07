@@ -168,6 +168,9 @@ impl<F: FieldExt> ExecutionGadget<F> for CallGadget<F> {
             );
         });
 
+        // Dive into callee's context, reset state_write_counter_offset
+        cb.reset_state_write_counter_offset();
+
         // Verify transfer
         let value_is_zero =
             IsZeroGadget::construct(cb, sum::expr(&value.cells));
@@ -183,8 +186,8 @@ impl<F: FieldExt> ExecutionGadget<F> for CallGadget<F> {
             caller_address.expr(),
             callee_address.clone(),
             value.clone(),
-            is_persistent.expr(),
-            rw_counter_end_of_reversion.expr(),
+            callee_is_persistent.expr(),
+            callee_rw_counter_end_of_reversion.expr(),
         );
 
         // Verify gas cost
@@ -277,10 +280,7 @@ impl<F: FieldExt> ExecutionGadget<F> for CallGadget<F> {
 
         // Setup next call's context.
         for (field_tag, value) in [
-            (
-                CallContextFieldTag::CallerCallId,
-                cb.curr.state.call_id.expr(),
-            ),
+            (CallContextFieldTag::CallerId, cb.curr.state.call_id.expr()),
             (CallContextFieldTag::TxId, tx_id.expr()),
             (CallContextFieldTag::Depth, depth.expr() + 1.expr()),
             (CallContextFieldTag::CallerAddress, caller_address.expr()),
@@ -565,19 +565,10 @@ mod test {
     use bus_mapping::{
         bytecode,
         eth_types::{Address, ToWord, Transaction, Word},
+        evm::OpcodeId,
         external_tracer::Account,
     };
     use std::default::Default;
-
-    #[derive(Clone, Copy, Debug, Default)]
-    struct CallContext {
-        rw_counter_end_of_reversion: usize,
-        is_persistent: bool,
-        is_static: bool,
-        gas_left: u64,
-        memory_size: u32,
-        state_write_counter: usize,
-    }
 
     #[derive(Clone, Copy, Debug, Default)]
     struct Stack {
@@ -587,9 +578,15 @@ mod test {
         cd_length: Word,
         rd_offset: Word,
         rd_length: Word,
+        is_success: bool,
     }
 
     fn test_ok(caller: Account, callee: Account, stack: Stack) {
+        let terminator = if stack.is_success {
+            OpcodeId::RETURN
+        } else {
+            OpcodeId::REVERT
+        };
         let bytecode = bytecode! {
             PUSH32(stack.rd_length)
             PUSH32(stack.rd_offset)
@@ -599,7 +596,9 @@ mod test {
             PUSH32(callee.address.to_word())
             PUSH32(stack.gas)
             CALL
-            STOP
+            PUSH32(0)
+            PUSH32(0)
+            .write_op(terminator)
         };
         let block = build_block(
             &[
@@ -632,13 +631,20 @@ mod test {
             code: [0].into(),
             ..Default::default()
         };
-        test_ok(
-            caller,
-            callee,
+
+        for stack in [
             Stack {
                 value: one_ether,
+                is_success: true,
                 ..Default::default()
             },
-        )
+            Stack {
+                value: one_ether,
+                is_success: false,
+                ..Default::default()
+            },
+        ] {
+            test_ok(caller.clone(), callee.clone(), stack);
+        }
     }
 }

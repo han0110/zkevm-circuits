@@ -63,18 +63,21 @@ impl Opcode for Call {
             value: (call.is_success as u64).into(),
         });
 
+        let value_prev = state.sdb.add_account_to_access_list(call.address);
         state.push_op(TxAccessListAccountOp {
             tx_id,
             address: call.address,
             value: true,
-            value_prev: false,
+            value_prev,
         });
-        state.caller_ctx_mut().push_op_rev(TxAccessListAccountOp {
-            tx_id,
-            address: call.address,
-            value: false,
-            value_prev: true,
-        });
+        state
+            .caller_ctx_mut()
+            .push_op_reverted(TxAccessListAccountOp {
+                tx_id,
+                address: call.address,
+                value: value_prev,
+                value_prev: true,
+            });
 
         for (field, value) in [
             (CallContextField::RwCounterEndOfReversion, 0.into()),
@@ -106,7 +109,7 @@ impl Opcode for Call {
             value: caller_balance,
             value_prev: caller_balance_prev,
         });
-        state.call_ctx_mut().push_op_rev(AccountOp {
+        state.call_ctx_mut().push_op_reverted(AccountOp {
             rw: RW::WRITE,
             address: call.caller_address,
             field: AccountField::Balance,
@@ -128,7 +131,7 @@ impl Opcode for Call {
             value: callee_balance,
             value_prev: callee_balance_prev,
         });
-        state.call_ctx_mut().push_op_rev(AccountOp {
+        state.call_ctx_mut().push_op_reverted(AccountOp {
             rw: RW::WRITE,
             address: call.address,
             field: AccountField::Balance,
@@ -203,7 +206,7 @@ impl Opcode for Call {
         }
 
         for (field, value) in [
-            (CallContextField::CallerCallId, caller_call.call_id.into()),
+            (CallContextField::CallerId, caller_call.call_id.into()),
             (CallContextField::TxId, tx_id.into()),
             (CallContextField::Depth, call.depth.into()),
             (
