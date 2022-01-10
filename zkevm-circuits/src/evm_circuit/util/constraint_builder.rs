@@ -765,6 +765,10 @@ impl<'a, F: FieldExt> ConstraintBuilder<'a, F> {
 
     // General
 
+    pub fn reset_state_write_counter_offset(&mut self) {
+        self.state_write_counter_offset = 0;
+    }
+
     pub(crate) fn condition<R>(
         &mut self,
         condition: Expression<F>,
